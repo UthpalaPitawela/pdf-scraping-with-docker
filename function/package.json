@@ -1,0 +1,12 @@
+{
+    "name": "playwright-with-docker",
+    "version": "0.0.1",
+    "main": "index.js",
+    "license": "MIT",
+    "private": false,
+    "dependencies": {
+      "playwright": "^1.7.1",
+      "aws-sdk": "^2.1000.0",
+      "axios": "^1.7.2"
+    }
+  }
