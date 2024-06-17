@@ -4,14 +4,18 @@ const pdf = require("pdf-parse");
 const path = require("path");
 const AWS = require("aws-sdk");
 const axios = require("axios");
-const crypto = require("crypto");
+const {
+  createAuthorizationHeader,
+  createRequestPayload,
+  getAmzDate,
+} = require("./utils/auth/auth-header");
 // Example usage
 
 // Initialize AWS SDK with configured credentials and region
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_DEFAULT_REGION
+  region: process.env.AWS_DEFAULT_REGION,
 });
 
 const ssm = new AWS.SSM();
@@ -77,14 +81,15 @@ exports.handler = async (event, context) => {
 
     const preSignedUrl = await getSignedUrl();
     const response = await putToS3(preSignedUrl, dataBuffer);
-
+    const result = "";
     if (response.ok) {
-      const text = await response.text();
+      result = await response.text();
     } else {
-      const error = await response.json();
+      result = await response.json();
     }
 
     await page.waitForTimeout(600000);
+    return result;
   } catch (error) {
     console.log(`error${error}`);
     throw error;
@@ -107,71 +112,13 @@ const putToS3 = async (url, data) => {
 };
 
 const getSignedUrl = async () => {
-  const accessKey = await getAccessKey();
-  console.log('accessKey¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬', accessKey)
-  const secretKey = await getSecretAccessKey();
-  console.log('secretKey¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬', secretKey)
-  const region = await getRegion();
-  console.log('region¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬¬', region)
-  const service = "execute-api";
-  const credentials = new AWS.Credentials(accessKey, secretKey);
-  // AWS.config.update({ region: region });
-  const requestPayload = JSON.stringify({
-    uploadType: "DOCUMENT",
-    mimeType: "application/pdf",
-  });
-
   try {
-    const amzDate =
-      new Date()
-        .toISOString()
-        .replace(/[:\-]|\.\d{3}/g, "")
-        .slice(0, 15) + "Z";
-    const dateStamp = amzDate.substring(0, 8);
-    // Canonical request headers
-    const canonicalHeaders = `content-type:application/json\nhost:n5fp6dyzhl.execute-api.us-east-1.amazonaws.com\nx-amz-date:${amzDate}\n`;
-
-    // Signed headers
-    const signedHeaders = "content-type;host;x-amz-date";
-
-    // Hash the payload
-    const payloadHash = crypto
-      .createHash("sha256")
-      .update(requestPayload)
-      .digest("hex");
-
-    // Canonical request
-    const canonicalRequest = `POST\n/develop/organizations/fef07aad-6bf2-48eb-be07-b0bcdf373fa0/files/signed-url\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
-
-    // String to sign
-    const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${dateStamp}/${region}/${service}/aws4_request\n${crypto
-      .createHash("sha256")
-      .update(canonicalRequest)
-      .digest("hex")}`;
-
-    // Calculate the signing key
-    const kDate = crypto
-      .createHmac("sha256", "AWS4" + secretKey)
-      .update(dateStamp)
-      .digest();
-    const kRegion = crypto.createHmac("sha256", kDate).update(region).digest();
-    const kService = crypto
-      .createHmac("sha256", kRegion)
-      .update(service)
-      .digest();
-    const kSigning = crypto
-      .createHmac("sha256", kService)
-      .update("aws4_request")
-      .digest();
-
-    // Signature
-    const signature = crypto
-      .createHmac("sha256", kSigning)
-      .update(stringToSign)
-      .digest("hex");
-
     // Authorization header
-    const authorizationHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${dateStamp}/${region}/${service}/aws4_request, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    const authorizationHeader = await createAuthorizationHeader();
+    const requestPayload = createRequestPayload();
+    const amzDate = getAmzDate();
+    console.log("authorizationHeader", authorizationHeader);
+    // const authorizationHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${dateStamp}/${region}/${service}/aws4_request, SignedHeaders=${signedHeaders}, Signature=${signature}`;
     const response = await axios.post(
       "https://n5fp6dyzhl.execute-api.us-east-1.amazonaws.com/develop/organizations/fef07aad-6bf2-48eb-be07-b0bcdf373fa0/files/signed-url",
       // `${endpoint.replace('{organizationId}', organizationId)}`,
@@ -196,45 +143,5 @@ const getSignedUrl = async () => {
   } catch (error) {
     console.error("Error fetching organization ID:", error);
     throw error;
-  }
-};
-
-const getAccessKey = async () => {
-  try {
-    const ssm = new AWS.SSM();
-    const parameter = await ssm.getParameter({ 
-      Name: '/zitles/dev/scraping/accesskey', 
-      WithDecryption: false 
-      }).promise();
-    return parameter.Parameter.Value;
-  } catch (err) {
-    console.error("Error retrieving parameters:", err);
-    throw err;
-  }
-};
-const getSecretAccessKey = async () => {
-  try {
-    const ssm = new AWS.SSM();
-    const parameter = await ssm.getParameter({ 
-      Name: '/zitles/dev/scraping/secretKey', 
-      WithDecryption: false 
-      }).promise();
-    return parameter.Parameter.Value;
-  } catch (err) {
-    console.error("Error retrieving parameters:", err);
-    throw err;
-  }
-};
-const getRegion = async () => {
-  try {
-    const ssm = new AWS.SSM();
-    const parameter = await ssm.getParameter({ 
-      Name: '/zitles/dev/scraping/region', 
-      WithDecryption: false 
-      }).promise();
-    return parameter.Parameter.Value;
-  } catch (err) {
-    console.error("Error retrieving parameters:", err);
-    throw err;
   }
 };
